@@ -3,8 +3,10 @@ const mongoose = require("mongoose");
 const cors = require("cors");
 const multer = require("multer");
 const path = require("path");
-require("dotenv").config();
+const dotenv = require("dotenv");
+const authRoutes = require("./routes/auth");
 
+dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 5000;
 
@@ -13,40 +15,39 @@ app.use(cors());
 app.use(express.json());
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
-// Connect to MongoDB
-mongoose.connect(process.env.MONGO_URI, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-})
-.then(() => console.log("✅ MongoDB Connected"))
-.catch(err => console.error("❌ MongoDB Connection Error:", err));
+// MongoDB Connection
+mongoose.connect(process.env.MONGO_URI)
+    .then(() => console.log("✅ MongoDB Connected"))
+    .catch(err => console.error("❌ MongoDB Connection Error:", err));
 
-// Define Mongoose Schema
+// Auth Routes
+app.use("/api/auth", authRoutes);
+
+// Job Application Schema
 const jobApplicationSchema = new mongoose.Schema({
-    firstName: { type: String, required: false },
-    lastName: { type: String, required: false },
+    firstName: String,
+    lastName: String,
     email: { type: String, required: true },
-    phoneNumber: { type: String, required: false },
-    yearOfGraduation: { type: String, required: false },
-    gender: { type: String, required: false },
-    experience: { type: String, required: false },
-    skills: { type: String, required: false },
-    location: { type: String, required: false },
-    pincode: { type: String, required: false },
-    resume: { type: String, required: false },
+    phoneNumber: Number,
+    yearOfGraduation: Number,
+    gender: String,
+    experience: Number,
+    skills: String,
+    location: String,
+    pincode: String,
+    resume: String,
     status: { type: String, default: "Pending" },
 }, { timestamps: true });
 
 const JobApplication = mongoose.model("JobApplication", jobApplicationSchema);
 
-// Set up multer for file uploads
+// Multer setup for file uploads
 const storage = multer.diskStorage({
     destination: "./uploads/",
     filename: (req, file, cb) => {
-        cb(null, Date.now() + path.extname(file.originalname)); // Unique file name
-    }
+        cb(null, Date.now() + path.extname(file.originalname));
+    },
 });
-
 const upload = multer({ storage });
 
 // Routes
@@ -54,7 +55,7 @@ app.get("/", (req, res) => {
     res.send("Welcome to the Job Application API 🚀");
 });
 
-// GET all job applications
+// Get all applications (Only accessible by admins or authorized users)
 app.get("/api/jobapplications", async (req, res) => {
     try {
         const applications = await JobApplication.find();
@@ -64,33 +65,34 @@ app.get("/api/jobapplications", async (req, res) => {
     }
 });
 
-// POST job application with resume upload
+// Submit a job application
 app.post("/api/jobapplications", upload.single("resume"), async (req, res) => {
     try {
-        const { firstName, lastName, email, phoneNumber, yearOfGraduation, gender, experience, skills, location, pincode } = req.body;
+        const { firstName, lastName, email, phoneNumber, experience, skills, location, pincode, yearOfGraduation, gender } = req.body;
 
         const newApplication = new JobApplication({
             firstName,
             lastName,
             email,
             phoneNumber,
-            yearOfGraduation,
-            gender,
             experience,
             skills,
             location,
             pincode,
-            resume: req.file ? req.file.filename : "",  // Save filename if uploaded
-            status: "Pending",
+            yearOfGraduation,
+            gender,
+            resume: req.file ? req.file.filename : "", // Store the filename of the uploaded resume
+            status: "Pending", // Default status
         });
 
         await newApplication.save();
         res.status(201).json({ message: "✅ Application submitted successfully!" });
     } catch (error) {
-        console.error("❌ Error submitting application:", error);
         res.status(500).json({ error: "Internal server error" });
     }
 });
 
-// Start Server
-app.listen(PORT, () => console.log(`🚀 Server running on http://localhost:${PORT}`));
+// Start server
+app.listen(PORT, () => {
+    console.log(`🚀 Server running at http://localhost:${PORT}`);
+});
