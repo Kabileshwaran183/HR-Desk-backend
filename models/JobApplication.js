@@ -1,6 +1,6 @@
 const mongoose = require("mongoose");
 
-const jobApplicationSchema = new mongoose.Schema({
+const JobApplicationSchema = new mongoose.Schema({
     jobId: { type: mongoose.Schema.Types.ObjectId, ref: 'Job' },
     firstName: String,
     lastName: String,
@@ -12,9 +12,10 @@ const jobApplicationSchema = new mongoose.Schema({
     skills: String,
     location: String,
     pincode: String,
+    jobTitle: String,
     resume: String, // filename stored
     status: { type: String, default: "Pending" },
 }, { timestamps: true });
 
-const JobApplication = mongoose.model("JobApplication", jobApplicationSchema);
+const JobApplication = mongoose.model("JobApplication", JobApplicationSchema);
 module.exports = JobApplication;
