@@ -13,7 +13,6 @@ const JobApplicationSchema = new mongoose.Schema({
     location: String,
     jobTitle:String,
     pincode: String,
-    jobTitle: String,
     resume: String, // filename stored
     status: { type: String, default: "Pending" },
 }, { timestamps: true });

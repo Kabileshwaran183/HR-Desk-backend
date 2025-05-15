@@ -69,7 +69,7 @@ app.get("/api/jobapplications", async (req, res) => {
 // Submit a job application
 app.post("/api/jobapplications", upload.single("resume"), async (req, res) => {
     try {
-        const { firstName, lastName, email, phoneNumber, experience, skills, location, pincode, yearOfGraduation, gender } = req.body;
+        const { firstName, lastName, email, phoneNumber, jobTitle, experience, skills, location, pincode, yearOfGraduation, gender } = req.body;
 
         const newApplication = new JobApplication({
             firstName,
