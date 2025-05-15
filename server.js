@@ -33,6 +33,7 @@ const jobApplicationSchema = new mongoose.Schema({
     gender: String,
     experience: Number,
     skills: String,
+    jobTitle: String,
     location: String,
     pincode: String,
     resume: String,
@@ -79,6 +80,7 @@ app.post("/api/jobapplications", upload.single("resume"), async (req, res) => {
             skills,
             location,
             pincode,
+            jobTitle,
             yearOfGraduation,
             gender,
             resume: req.file ? req.file.filename : "", // Store the filename of the uploaded resume

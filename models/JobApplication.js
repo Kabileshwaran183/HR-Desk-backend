@@ -11,6 +11,7 @@ const JobApplicationSchema = new mongoose.Schema({
     experience: String,
     skills: String,
     location: String,
+    jobTitle:String,
     pincode: String,
     jobTitle: String,
     resume: String, // filename stored
