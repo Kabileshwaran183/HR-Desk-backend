@@ -27,7 +27,6 @@ router.post("/apply", upload.single("resume"), async (req, res) => {
             phoneNumber,
             yearOfGraduation,
             gender,
-            jobTitle,
             experience,
             skills,
             location,
