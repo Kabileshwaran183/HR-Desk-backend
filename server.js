@@ -78,7 +78,7 @@ app.post("/api/jobapplications", upload.single("resume"), async (req, res) => {
             phoneNumber,
             experience,
             skills,
-            location,
+            location,  
             pincode,
             jobTitle,
             yearOfGraduation,
