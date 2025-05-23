@@ -16,7 +16,10 @@ app.use(express.json());
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 // MongoDB Connection
-mongoose.connect(process.env.MONGO_URI)
+mongoose.connect(process.env.MONGO_URI, {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+})
     .then(() => console.log("✅ MongoDB Connected"))
     .catch(err => console.error("❌ MongoDB Connection Error:", err));
 
@@ -25,10 +28,10 @@ app.use("/api/auth", authRoutes);
 
 // Job Application Schema
 const jobApplicationSchema = new mongoose.Schema({
-    firstName: String,
-    lastName: String,
+    firstName: { type: String, required: true },
+    lastName: { type: String, required: true },
     email: { type: String, required: true },
-    phoneNumber: Number,
+    phoneNumber: { type: String, required: true },
     yearOfGraduation: Number,
     gender: String,
     experience: Number,
@@ -44,22 +47,25 @@ const JobApplication = mongoose.model("JobApplication", jobApplicationSchema);
 
 // Multer setup for file uploads
 const storage = multer.diskStorage({
-    destination: "./uploads/",
+    destination: (req, file, cb) => {
+        cb(null, path.join(__dirname, "uploads"));
+    },
     filename: (req, file, cb) => {
-        cb(null, Date.now() + path.extname(file.originalname));
+        const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+        cb(null, `${uniqueSuffix}${path.extname(file.originalname)}`);
     },
 });
 const upload = multer({ storage });
 
-// Routes
+// Root Route
 app.get("/", (req, res) => {
     res.send("Welcome to the Job Application API 🚀");
 });
 
-// Get all applications (Only accessible by admins or authorized users)
+// Get all applications
 app.get("/api/jobapplications", async (req, res) => {
     try {
-        const applications = await JobApplication.find();
+        const applications = await JobApplication.find().sort({ createdAt: -1 });
         res.json(applications);
     } catch (error) {
         res.status(500).json({ error: "Error fetching applications" });
@@ -69,7 +75,19 @@ app.get("/api/jobapplications", async (req, res) => {
 // Submit a job application
 app.post("/api/jobapplications", upload.single("resume"), async (req, res) => {
     try {
-        const { firstName, lastName, email, phoneNumber, jobTitle, experience, skills, location, pincode, yearOfGraduation, gender } = req.body;
+        const {
+            firstName,
+            lastName,
+            email,
+            phoneNumber,
+            jobTitle,
+            experience,
+            skills,
+            location,
+            pincode,
+            yearOfGraduation,
+            gender
+        } = req.body;
 
         const newApplication = new JobApplication({
             firstName,
@@ -83,13 +101,13 @@ app.post("/api/jobapplications", upload.single("resume"), async (req, res) => {
             jobTitle,
             yearOfGraduation,
             gender,
-            resume: req.file ? req.file.filename : "", // Store the filename of the uploaded resume
-            status: "Pending", // Default status
+            resume: req.file?.filename || "",
         });
 
         await newApplication.save();
         res.status(201).json({ message: "✅ Application submitted successfully!" });
     } catch (error) {
+        console.error("❌ Error submitting application:", error);
         res.status(500).json({ error: "Internal server error" });
     }
 });
