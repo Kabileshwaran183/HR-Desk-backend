@@ -13,7 +13,6 @@ const JobApplication = require("./models/JobApplication");
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-
 const dashboardRoutes = require("./routes/dashboard");
 app.use("/api/dashboard", dashboardRoutes);
 
@@ -69,11 +68,7 @@ app.patch("/api/jobapplications/:id/status", async (req, res) => {
             return res.status(400).json({ message: "Status is required" });
         }
 
-        const updatedApp = await JobApplication.findByIdAndUpdate(
-            appId,
-            { status },
-            { new: true }
-        );
+        const updatedApp = await JobApplication.findByIdAndUpdate(appId, { status }, { new: true });
 
         if (!updatedApp) {
             return res.status(404).json({ message: "Application not found" });
@@ -83,6 +78,24 @@ app.patch("/api/jobapplications/:id/status", async (req, res) => {
     } catch (error) {
         console.error("Error updating status:", error);
         res.status(500).json({ message: "Server error" });
+    }
+});
+
+// DELETE route to delete candidate by ID
+app.delete("/api/jobapplications/:id", async (req, res) => {
+    const id = req.params.id;
+
+    try {
+        const deleted = await JobApplication.findByIdAndDelete(id);
+
+        if (!deleted) {
+            return res.status(404).json({ error: "Candidate not found" });
+        }
+
+        return res.status(200).json({ message: "Candidate deleted successfully" });
+    } catch (error) {
+        console.error("Error deleting candidate:", error);
+        return res.status(500).json({ error: "Server error while deleting candidate" });
     }
 });
 
