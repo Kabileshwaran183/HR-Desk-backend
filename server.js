@@ -1,114 +1,157 @@
+require("dotenv").config();
 const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
-const multer = require("multer");
-const path = require("path");
-const dotenv = require("dotenv");
-const authRoutes = require("./routes/auth");
+const nodemailer = require("nodemailer");
+const { google } = require("googleapis");
 
-dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Middleware
 app.use(cors());
 app.use(express.json());
-app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
-// MongoDB Connection
+// MongoDB connection
 mongoose.connect(process.env.MONGO_URI, {
     useNewUrlParser: true,
     useUnifiedTopology: true,
 })
-    .then(() => console.log("✅ MongoDB Connected"))
-    .catch(err => console.error("❌ MongoDB Connection Error:", err));
+    .then(() => console.log("✅ MongoDB connected"))
+    .catch((err) => console.error("❌ MongoDB connection error:", err));
 
-// Auth Routes
-app.use("/api/auth", authRoutes);
-
-// Job Application Schema
+// Mongoose schema
 const jobApplicationSchema = new mongoose.Schema({
-    firstName: { type: String, required: true },
-    lastName: { type: String, required: true },
-    email: { type: String, required: true },
-    phoneNumber: { type: String, required: true },
-    yearOfGraduation: Number,
-    gender: String,
-    experience: Number,
-    skills: String,
+    firstName: String,
+    lastName: String,
+    email: String,
+    phoneNumber: String,
     jobTitle: String,
-    location: String,
-    pincode: String,
-    resume: String,
     status: { type: String, default: "Pending" },
+    interviewDate: Date,
+    ranking: Number,
 }, { timestamps: true });
 
 const JobApplication = mongoose.model("JobApplication", jobApplicationSchema);
 
-// Multer setup for file uploads
-const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-        cb(null, path.join(__dirname, "uploads"));
-    },
-    filename: (req, file, cb) => {
-        const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-        cb(null, `${uniqueSuffix}${path.extname(file.originalname)}`);
-    },
-});
-const upload = multer({ storage });
+// Google OAuth2 Client
+const oAuth2Client = new google.auth.OAuth2(
+    process.env.CLIENT_ID,
+    process.env.CLIENT_SECRET,
+    process.env.REDIRECT_URI
+);
+oAuth2Client.setCredentials({ refresh_token: process.env.REFRESH_TOKEN });
 
-// Root Route
+// Nodemailer transporter with OAuth2
+async function createTransporter() {
+    try {
+        const accessToken = await oAuth2Client.getAccessToken();
+        return nodemailer.createTransport({
+            service: "gmail",
+            auth: {
+                type: "OAuth2",
+                user: process.env.SENDER_EMAIL,
+                clientId: process.env.CLIENT_ID,
+                clientSecret: process.env.CLIENT_SECRET,
+                refreshToken: process.env.REFRESH_TOKEN,
+                accessToken: accessToken.token,
+            },
+        });
+    } catch (err) {
+        console.error("❌ Failed to create email transporter:", err);
+        return null;
+    }
+}
+
+// Routes
 app.get("/", (req, res) => {
-    res.send("Welcome to the Job Application API 🚀");
+    res.send("Job Application API is running 🚀");
 });
 
-// Get all applications
+// Get all job applications
 app.get("/api/jobapplications", async (req, res) => {
     try {
-        const applications = await JobApplication.find().sort({ createdAt: -1 });
-        res.json(applications);
-    } catch (error) {
-        res.status(500).json({ error: "Error fetching applications" });
+        const apps = await JobApplication.find().sort({ createdAt: -1 });
+        res.json(apps);
+    } catch (err) {
+        res.status(500).json({ error: "Failed to fetch applications" });
     }
 });
 
-// Submit a job application
-app.post("/api/jobapplications", upload.single("resume"), async (req, res) => {
+// Schedule Interview
+app.post("/api/schedule", async (req, res) => {
     try {
-        const {
-            firstName,
-            lastName,
-            email,
-            phoneNumber,
-            jobTitle,
-            experience,
-            skills,
-            location,
-            pincode,
-            yearOfGraduation,
-            gender
-        } = req.body;
+        const { applicantId, interviewDate, ranking } = req.body;
 
-        const newApplication = new JobApplication({
-            firstName,
-            lastName,
-            email,
-            phoneNumber,
-            experience,
-            skills,
-            location,
-            pincode,
-            jobTitle,
-            yearOfGraduation,
-            gender,
-            resume: req.file?.filename || "",
+        if (!applicantId || !interviewDate || typeof ranking !== "number") {
+            return res.status(400).json({ error: "Missing or invalid fields" });
+        }
+
+        // Find applicant
+        const applicant = await JobApplication.findById(applicantId);
+        if (!applicant) return res.status(404).json({ error: "Applicant not found" });
+
+        // Update applicant
+        applicant.status = "Interview Scheduled";
+        applicant.interviewDate = new Date(interviewDate);
+        applicant.ranking = ranking;
+        await applicant.save();
+
+        // Create Calendar Event
+        const calendar = google.calendar({ version: "v3", auth: oAuth2Client });
+        const event = {
+            summary: `Interview with ${applicant.firstName} ${applicant.lastName}`,
+            description: `Interview for ${applicant.jobTitle}`,
+            start: { dateTime: new Date(interviewDate).toISOString() },
+            end: {
+                dateTime: new Date(
+                    new Date(interviewDate).getTime() + 60 * 60 * 1000
+                ).toISOString(),
+            },
+            attendees: [{ email: applicant.email }],
+            reminders: {
+                useDefault: false,
+                overrides: [
+                    { method: "email", minutes: 24 * 60 },
+                    { method: "popup", minutes: 10 },
+                ],
+            },
+        };
+
+        const calendarResponse = await calendar.events.insert({
+            calendarId: "primary",
+            resource: event,
+            sendUpdates: "all",
         });
 
-        await newApplication.save();
-        res.status(201).json({ message: "✅ Application submitted successfully!" });
+        // Send Email
+        const transporter = await createTransporter();
+        if (!transporter) {
+            return res.status(500).json({ error: "Failed to set up email transporter" });
+        }
+
+        const mailOptions = {
+            from: `HR Desk <${process.env.SENDER_EMAIL}>`,
+            to: applicant.email,
+            subject: "Interview Scheduled - HR Desk",
+            text: `Dear ${applicant.firstName},\n\nYour interview is scheduled on ${new Date(interviewDate).toLocaleString()}.\n\nBest regards,\nHR Desk`,
+            html: `
+                <p>Dear ${applicant.firstName},</p>
+                <p>Your interview is scheduled on <strong>${new Date(interviewDate).toLocaleString()}</strong>.</p>
+                <p>We've added the event to your calendar.</p>
+                <p>Best regards,<br/>HR Desk</p>
+            `,
+        };
+
+        await transporter.sendMail(mailOptions);
+
+        res.json({
+            message: "Interview scheduled and email sent",
+            eventId: calendarResponse.data.id,
+        });
     } catch (error) {
-        console.error("❌ Error submitting application:", error);
-        res.status(500).json({ error: "Internal server error" });
+        console.error("❌ Error scheduling interview:", error);
+        res.status(500).json({ error: error.message || "Internal Server Error" });
     }
 });
 
