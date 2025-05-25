@@ -8,29 +8,42 @@ const path = require("path");
 const authRoutes = require("./routes/auth");
 const jobApplicationRoutes = require("./routes/jobApplicationRoutes");
 const scheduleRoutes = require("./routes/schedule");
+const dashboardRoutes = require("./routes/dashboard");
 const JobApplication = require("./models/JobApplication");
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-const dashboardRoutes = require("./routes/dashboard");
-app.use("/api/dashboard", dashboardRoutes);
+// Allow multiple origins for CORS (local dev + deployed frontend)
+const allowedOrigins = [
+    "http://localhost:5173",                    // React local dev server
+    "https://hrdeskfrontend.netlify.app",      // Your deployed frontend
+];
 
-// Middleware - CORS setup to allow your React frontend origin
 const corsOptions = {
-    origin: "http://localhost:5173", // React dev server URL
-    credentials: true,               // Allow cookies, authorization headers with requests
-};
-app.use(cors(corsOptions));
+    origin: function (origin, callback) {
+        // Allow requests with no origin like Postman or curl
+        if (!origin) return callback(null, true);
 
+        if (allowedOrigins.indexOf(origin) !== -1) {
+            callback(null, true);
+        } else {
+            callback(new Error(`CORS policy: Origin ${origin} not allowed`));
+        }
+    },
+    credentials: true, // Allow cookies and auth headers
+};
+
+app.use(cors(corsOptions));
 app.use(express.json());
 
-// Use routes
+// Routes
 app.use("/api/auth", authRoutes);
 app.use("/api/jobapplications", jobApplicationRoutes);
-app.use("/api", scheduleRoutes); // Mount schedule routes under /api
+app.use("/api", scheduleRoutes);
+app.use("/api/dashboard", dashboardRoutes);
 
-// Multer setup for file uploads
+// Multer setup for uploads
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
         cb(null, path.join(__dirname, "uploads"));
