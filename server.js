@@ -16,8 +16,13 @@ const PORT = process.env.PORT || 5000;
 const dashboardRoutes = require("./routes/dashboard");
 app.use("/api/dashboard", dashboardRoutes);
 
-// Middleware
-app.use(cors());
+// Middleware - CORS setup to allow your React frontend origin
+const corsOptions = {
+    origin: "http://localhost:5173", // React dev server URL
+    credentials: true,               // Allow cookies, authorization headers with requests
+};
+app.use(cors(corsOptions));
+
 app.use(express.json());
 
 // Use routes
