@@ -40,6 +40,19 @@ mongoose.connect(process.env.MONGO_URI, {
 app.use("/api/auth", authRoutes);
 
 // Register jobApplicationRoutes
+app.get("/", (req, res) => {
+    res.send("Welcome to the Job Application API 🚀");
+});
+
+// Get all applications
+app.get("/api/jobapplications", async (req, res) => {
+    try {
+        const applications = await JobApplication.find().sort({ createdAt: -1 });
+        res.json(applications);
+    } catch (error) {
+        res.status(500).json({ error: "Error fetching applications" });
+    }
+});
 app.use("/api/jobapplications", jobApplicationRoutes);
 
 // Schedule Interview Route
