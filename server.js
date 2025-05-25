@@ -4,7 +4,7 @@ const mongoose = require("mongoose");
 const cors = require("cors");
 const multer = require("multer");
 const path = require("path");
-const dotenv = require("dotenv");
+const nodemailer = require("nodemailer");
 const authRoutes = require("./routes/auth");
 const jobApplicationRoutes = require("./routes/jobApplicationRoutes");
 const JobApplication = require("./models/JobApplication");
@@ -15,17 +15,6 @@ const PORT = process.env.PORT || 5000;
 // Middleware
 app.use(cors());
 app.use(express.json());
-
-// MongoDB connection
-mongoose.connect(process.env.MONGO_URI, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-})
-    .then(() => console.log("✅ MongoDB connected"))
-    .catch((err) => console.error("❌ MongoDB connection error:", err));
-
-// Auth Routes
-app.use("/api/auth", authRoutes);
 
 // Multer setup for file uploads
 const storage = multer.diskStorage({
@@ -39,45 +28,64 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
-// Nodemailer transporter with OAuth2
-async function createTransporter() {
-    try {
-        const accessToken = await oAuth2Client.getAccessToken();
-        return nodemailer.createTransport({
-            service: "gmail",
-            auth: {
-                type: "OAuth2",
-                user: process.env.SENDER_EMAIL,
-                clientId: process.env.CLIENT_ID,
-                clientSecret: process.env.CLIENT_SECRET,
-                refreshToken: process.env.REFRESH_TOKEN,
-                accessToken: accessToken.token,
-            },
-        });
-    } catch (err) {
-        console.error("❌ Failed to create email transporter:", err);
-        return null;
-    }
-}
+// MongoDB connection
+mongoose.connect(process.env.MONGO_URI, {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+})
+    .then(() => console.log("✅ MongoDB connected"))
+    .catch((err) => console.error("❌ MongoDB connection error:", err));
 
-// Routes
-app.get("/", (req, res) => {
-    res.send("Job Application API is running 🚀");
-});
-
-// Get all job applications
-app.get("/api/jobapplications", async (req, res) => {
-    try {
-        const apps = await JobApplication.find().sort({ createdAt: -1 });
-        res.json(apps);
-    } catch (err) {
-        res.status(500).json({ error: "Failed to fetch applications" });
-    }
-});
-
+// Auth Routes
+app.use("/api/auth", authRoutes);
 
 // Register jobApplicationRoutes
 app.use("/api/jobapplications", jobApplicationRoutes);
+
+// Schedule Interview Route
+app.post("/api/schedule", async (req, res) => {
+    try {
+        const { email, name, date } = req.body;
+
+        if (!email || !name || !date) {
+            return res.status(400).json({ message: "Missing required fields" });
+        }
+
+        const formattedDate = new Date(date).toLocaleString();
+
+        const transporter = nodemailer.createTransport({
+            service: "gmail",
+            auth: {
+                user: process.env.SMTP_EMAIL,
+                pass: process.env.SMTP_PASSWORD,
+            },
+        });
+
+        const mailOptions = {
+            from: `HR Desk <${process.env.SMTP_EMAIL}>`,
+            to: email,
+            subject: "Interview Scheduled",
+            html: `
+                <h3>Hello ${name},</h3>
+                <p>Your interview is scheduled for:</p>
+                <p><strong>${formattedDate}</strong></p>
+                <br/>
+                <p>Best regards,<br/>HR Team</p>
+            `,
+        };
+
+        await transporter.sendMail(mailOptions);
+        res.status(200).json({ message: "Interview scheduled successfully" });
+    } catch (error) {
+        console.error("Error sending email:", error);
+        res.status(500).json({ message: "Failed to schedule interview" });
+    }
+});
+
+// Base route
+app.get("/", (req, res) => {
+    res.send("Job Application API is running 🚀");
+});
 
 // Start server
 app.listen(PORT, () => {
