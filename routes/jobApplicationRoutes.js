@@ -3,78 +3,75 @@ const router = express.Router();
 const multer = require("multer");
 const mongoose = require("mongoose");
 const stringSimilarity = require("string-similarity");
+const axios = require("axios");
 const JobApplication = require("../models/JobApplication");
 
-// Set up Multer storage
+// Multer storage setup
 const storage = multer.diskStorage({
-    destination: function (req, file, cb) {
+    destination: (req, file, cb) => {
         cb(null, "uploads/");
     },
-    filename: function (req, file, cb) {
+    filename: (req, file, cb) => {
         const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
         cb(null, uniqueSuffix + "-" + file.originalname);
     }
 });
-
 const upload = multer({ storage });
 
-// Helper function to compute TF-IDF vectors
-function computeTfIdfVectors(docs) {
-    const tfidf = {};
-    const docCount = docs.length;
+// Synonyms dictionary for skill matching
+const synonyms = {
+    "react": ["front-end", "frontend", "reactjs", "react.js"],
+    "node.js": ["node", "nodejs", "backend", "back-end"],
+    "rest apis": ["rest", "api", "apis", "restful"],
+    "git": ["version control", "github"],
+    "javascript": ["js", "ecmascript"],
+    "mysql": ["sql", "database", "mariadb"],
+    "python": ["py"],
+    "java": ["jvm"],
+    "c++": ["cpp"],
+    "docker": ["containerization"],
+    "kubernetes": ["k8s", "container orchestration"],
+    "manual testing": ["qa", "quality assurance", "testing"],
+    "automation testing": ["automation", "selenium", "cypress"],
+    "communication": ["soft skills", "interpersonal"],
+    "negotiation": ["sales", "bargaining"],
+    "crm": ["customer relationship management"],
+    "css": ["css3"],
+    "html": ["html5"],
+    "ui": ["frontend", "user interface"]
+};
 
-    // Calculate term frequency for each document
-    docs.forEach((doc, index) => {
-        const terms = doc.toLowerCase().match(/\b\w+\b/g) || [];
-        const termFreq = {};
-        terms.forEach(term => {
-            termFreq[term] = (termFreq[term] || 0) + 1;
-        });
-        tfidf[index] = termFreq;
-    });
-
-    // Calculate document frequency for each term
-    const docFreq = {};
-    Object.values(tfidf).forEach(termFreq => {
-        Object.keys(termFreq).forEach(term => {
-            docFreq[term] = (docFreq[term] || 0) + 1;
-        });
-    });
-
-    // Calculate TF-IDF for each term in each document
-    const tfidfVectors = {};
-    Object.entries(tfidf).forEach(([docIndex, termFreq]) => {
-        const vector = {};
-        Object.entries(termFreq).forEach(([term, freq]) => {
-            const idf = Math.log(docCount / (docFreq[term] || 1));
-            vector[term] = freq * idf;
-        });
-        tfidfVectors[docIndex] = vector;
-    });
-
-    return tfidfVectors;
+// Tokenize text into words
+function tokenize(text) {
+    if (!text) return [];
+    return text.toLowerCase().match(/\b\w+\b/g) || [];
 }
 
-// Helper function to compute cosine similarity between two vectors
-function cosineSimilarity(vecA, vecB) {
-    const intersection = Object.keys(vecA).filter(term => term in vecB);
-    let dotProduct = 0;
-    let magA = 0;
-    let magB = 0;
-
-    intersection.forEach(term => {
-        dotProduct += vecA[term] * vecB[term];
-    });
-
-    magA = Math.sqrt(Object.values(vecA).reduce((sum, val) => sum + val * val, 0));
-    magB = Math.sqrt(Object.values(vecB).reduce((sum, val) => sum + val * val, 0));
-
-    if (magA === 0 || magB === 0) return 0;
-
-    return dotProduct / (magA * magB);
+// Skill matching with synonyms and fuzzy logic
+function skillsMatch(skillA, skillB) {
+    if (skillA === skillB) return true;
+    if (synonyms[skillA] && synonyms[skillA].includes(skillB)) return true;
+    if (synonyms[skillB] && synonyms[skillB].includes(skillA)) return true;
+    if (skillA.includes(skillB) || skillB.includes(skillA)) return true;
+    return false;
 }
 
-// Helper function to calculate total years of experience from parsedResume work_experience array
+function fuzzySkillMatch(reqSkill, candidateSkills) {
+    let bestMatch = { skill: null, rating: 0 };
+    candidateSkills.forEach(candSkill => {
+        if (skillsMatch(reqSkill, candSkill)) {
+            bestMatch = { skill: candSkill, rating: 1 };
+        } else {
+            const rating = stringSimilarity.compareTwoStrings(reqSkill, candSkill);
+            if (rating > bestMatch.rating) {
+                bestMatch = { skill: candSkill, rating };
+            }
+        }
+    });
+    return bestMatch;
+}
+
+// Calculate total years of experience from work experience array
 function calculateYearsOfExperience(workExperience) {
     if (!workExperience || !Array.isArray(workExperience)) return 0;
 
@@ -106,8 +103,69 @@ function calculateYearsOfExperience(workExperience) {
     return totalMonths / 12; // convert months to years
 }
 
-const axios = require("axios");
+// Compute TF-IDF vectors for fallback semantic similarity
+function computeTfIdfVectors(docs) {
+    const tfidf = {};
+    const docCount = docs.length;
 
+    docs.forEach((doc, index) => {
+        const terms = doc.toLowerCase().match(/\b\w+\b/g) || [];
+        const termFreq = {};
+        terms.forEach(term => {
+            termFreq[term] = (termFreq[term] || 0) + 1;
+        });
+        tfidf[index] = termFreq;
+    });
+
+    const docFreq = {};
+    Object.values(tfidf).forEach(termFreq => {
+        Object.keys(termFreq).forEach(term => {
+            docFreq[term] = (docFreq[term] || 0) + 1;
+        });
+    });
+
+    const tfidfVectors = {};
+    Object.entries(tfidf).forEach(([docIndex, termFreq]) => {
+        const vector = {};
+        Object.entries(termFreq).forEach(([term, freq]) => {
+            const idf = Math.log(docCount / (docFreq[term] || 1));
+            vector[term] = freq * idf;
+        });
+        tfidfVectors[docIndex] = vector;
+    });
+
+    return tfidfVectors;
+}
+
+// Cosine similarity for TF-IDF vectors (objects)
+function cosineSimilarity(vecA, vecB) {
+    if (Array.isArray(vecA) && Array.isArray(vecB)) {
+        // Vector arrays version (OpenAI embeddings)
+        if (vecA.length !== vecB.length) return 0;
+        let dotProduct = 0, magA = 0, magB = 0;
+        for (let i = 0; i < vecA.length; i++) {
+            dotProduct += vecA[i] * vecB[i];
+            magA += vecA[i] * vecA[i];
+            magB += vecB[i] * vecB[i];
+        }
+        if (magA === 0 || magB === 0) return 0;
+        return dotProduct / (Math.sqrt(magA) * Math.sqrt(magB));
+    } else {
+        // Object vectors version (TF-IDF fallback)
+        const intersection = Object.keys(vecA).filter(term => term in vecB);
+        if (intersection.length === 0) return 0;
+        let dotProduct = 0;
+        intersection.forEach(term => {
+            dotProduct += vecA[term] * vecB[term];
+        });
+        const magA = Math.sqrt(Object.values(vecA).reduce((sum, val) => sum + val * val, 0));
+        const magB = Math.sqrt(Object.values(vecB).reduce((sum, val) => sum + val * val, 0));
+        if (magA === 0 || magB === 0) return 0;
+        return dotProduct / (magA * magB);
+    }
+}
+
+// Get OpenAI embedding vector
 async function getEmbedding(text) {
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
@@ -136,101 +194,7 @@ async function getEmbedding(text) {
     }
 }
 
-function cosineSimilarity(vecA, vecB) {
-    if (!vecA || !vecB || vecA.length !== vecB.length) return 0;
-    let dotProduct = 0;
-    let magA = 0;
-    let magB = 0;
-    for (let i = 0; i < vecA.length; i++) {
-        dotProduct += vecA[i] * vecB[i];
-        magA += vecA[i] * vecA[i];
-        magB += vecB[i] * vecB[i];
-    }
-    if (magA === 0 || magB === 0) return 0;
-    return dotProduct / (Math.sqrt(magA) * Math.sqrt(magB));
-}
-
-function tokenize(text) {
-    if (!text) return [];
-    return text.toLowerCase().match(/\b\w+\b/g) || [];
-}
-
-const synonyms = {
-    "react": ["front-end", "frontend", "reactjs", "react.js"],
-    "node.js": ["node", "nodejs", "backend", "back-end"],
-    "rest apis": ["rest", "api", "apis", "restful"],
-    "git": ["version control", "github"],
-    "javascript": ["js", "ecmascript"],
-    "mysql": ["sql", "database", "mariadb"],
-    "python": ["py"],
-    "java": ["jvm"],
-    "c++": ["cpp"],
-    "docker": ["containerization"],
-    "kubernetes": ["k8s", "container orchestration"],
-    "manual testing": ["qa", "quality assurance", "testing"],
-    "automation testing": ["automation", "selenium", "cypress"],
-    "communication": ["soft skills", "interpersonal"],
-    "negotiation": ["sales", "bargaining"],
-    "crm": ["customer relationship management"],
-    "css": ["css3"],
-    "html": ["html5"],
-    "ui": ["frontend", "user interface"]
-};
-
-function skillsMatch(skillA, skillB) {
-    if (skillA === skillB) return true;
-    if (synonyms[skillA] && synonyms[skillA].includes(skillB)) return true;
-    if (synonyms[skillB] && synonyms[skillB].includes(skillA)) return true;
-    if (skillA.includes(skillB) || skillB.includes(skillA)) return true;
-    return false;
-}
-
-function fuzzySkillMatch(reqSkill, candidateSkills) {
-    let bestMatch = { skill: null, rating: 0 };
-    candidateSkills.forEach(candSkill => {
-        if (skillsMatch(reqSkill, candSkill)) {
-            bestMatch = { skill: candSkill, rating: 1 };
-        } else {
-            const rating = stringSimilarity.compareTwoStrings(reqSkill, candSkill);
-            if (rating > bestMatch.rating) {
-                bestMatch = { skill: candSkill, rating };
-            }
-        }
-    });
-    return bestMatch;
-}
-
-function calculateYearsOfExperience(workExperience) {
-    if (!workExperience || !Array.isArray(workExperience)) return 0;
-
-    let totalMonths = 0;
-
-    workExperience.forEach(exp => {
-        const startDateStr = exp.dates?.start_date || exp.start_date || "";
-        const endDateStr = exp.dates?.end_date || exp.end_date || "";
-
-        const startDate = new Date(startDateStr);
-        let endDate;
-
-        if (!endDateStr || endDateStr.toLowerCase() === "present") {
-            endDate = new Date();
-        } else {
-            endDate = new Date(endDateStr);
-        }
-
-        if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
-            return; // skip invalid dates
-        }
-
-        const months = (endDate.getFullYear() - startDate.getFullYear()) * 12 + (endDate.getMonth() - startDate.getMonth());
-        if (months > 0) {
-            totalMonths += months;
-        }
-    });
-
-    return totalMonths / 12; // convert months to years
-}
-
+// Main function to compute match details and scores
 async function computeMatchDetails(jobTitle, jobDescription, jobSkills, candidate) {
     // Extract required skills
     let requiredSkills = [];
@@ -276,301 +240,164 @@ async function computeMatchDetails(jobTitle, jobDescription, jobSkills, candidat
     let candidateExp = 0;
     if (candidate.work_experience && Array.isArray(candidate.work_experience)) {
         candidateExp = calculateYearsOfExperience(candidate.work_experience);
-    } else {
-        candidateExp = parseFloat(candidate.experience) || 0;
     }
 
-    // Check for projects/internships if experience is 0 or empty
-    if (candidateExp === 0 && candidate.work_experience && Array.isArray(candidate.work_experience)) {
-        const projectKeywords = ["project", "internship", "intern", "training"];
-        const workExpText = candidate.work_experience.map(exp => JSON.stringify(exp).toLowerCase()).join(" ");
-        const hasProject = projectKeywords.some(keyword => workExpText.includes(keyword));
-        if (hasProject) {
-            candidateExp = 0.5; // Assign partial experience for projects/internships
-        }
-    }
+    // Minimum experience (from candidate.minExperience or 0)
+    const minExpRequired = candidate.minExperience || 0;
 
-    // Treat 0 experience as fresher with minimum 0.5 years
-    if (candidateExp === 0) {
-        candidateExp = 0.5;
-    }
+    // Experience match score (0 to 1)
+    const expMatchScore = candidateExp >= minExpRequired ? 1 : candidateExp / minExpRequired;
 
-    const requiredExp = parseFloat(candidate.minExperience) || 0;
+    // Skill match score weights: full match=1, partial=0.6, missing=0
+    const skillMatchScore = (matchedSkills.length + partiallyMatchedSkills.length * 0.6) / requiredSkills.length || 0;
 
-    let experienceScore = 0;
-    if (requiredExp === 0) {
-        experienceScore = 100;
-    } else if (candidateExp >= requiredExp) {
-        experienceScore = 100;
-    } else {
-        experienceScore = Math.round((candidateExp / requiredExp) * 100);
-    }
+    // Text semantic similarity (job title + description vs candidate resume + skills)
+    const jobText = (jobTitle + " " + jobDescription).toLowerCase();
+    const candidateText = (
+        candidate.resume_text +
+        " " +
+        candidate.skills?.join(" ") +
+        " " +
+        (candidate.work_experience ? candidate.work_experience.map(exp => exp.title + " " + exp.description).join(" ") : "")
+    ).toLowerCase();
 
-    // Semantic similarity using OpenAI embeddings if available, else fallback to TF-IDF
-    const candidateText = [
-        candidate.education || "",
-        candidate.work_experience ? (Array.isArray(candidate.work_experience) ? candidate.work_experience.join(" ") : candidate.work_experience) : "",
-        candidate.summary || ""
-    ].join(" ").toLowerCase();
-
-    const jobText = [jobTitle || "", jobDescription || ""].join(" ").toLowerCase();
+    // Get OpenAI embeddings
+    let embeddingJob = await getEmbedding(jobText);
+    let embeddingCandidate = await getEmbedding(candidateText);
 
     let semanticSimilarity = 0;
-    const embeddingJob = await getEmbedding(jobText);
-    const embeddingCandidate = await getEmbedding(candidateText);
 
     if (embeddingJob && embeddingCandidate) {
         semanticSimilarity = cosineSimilarity(embeddingJob, embeddingCandidate);
     } else {
-        // Fallback to TF-IDF cosine similarity
+        // fallback TF-IDF similarity
         const tfidfVectors = computeTfIdfVectors([jobText, candidateText]);
         semanticSimilarity = cosineSimilarity(tfidfVectors[0], tfidfVectors[1]);
     }
 
-    // Objective score as keyword overlap
-    const objectiveText = (candidate.summary || "").toLowerCase();
-    const objectiveTokens = new Set(tokenize(objectiveText));
-    const jobTokens = new Set(tokenize(jobText));
-
-    let objectiveOverlapCount = 0;
-    jobTokens.forEach(token => {
-        if (objectiveTokens.has(token)) objectiveOverlapCount++;
-    });
-
-    const objectiveScore = jobTokens.size > 0 ? (objectiveOverlapCount / jobTokens.size) * 100 : 0;
-
-    // Skill match score weighted higher with partial credit
-    const skillMatchScore = requiredSkills.length > 0 ? ((matchedSkills.length + 0.5 * partiallyMatchedSkills.length) / requiredSkills.length) * 100 : 0;
-
-    // Combine scores: 45% skill match, 40% experience match, 15% semantic similarity (max of objectiveScore and semanticSimilarity)
-    const semanticScore = Math.max(objectiveScore / 100, semanticSimilarity) * 100;
-
-    const combinedScore = (0.45 * skillMatchScore) + (0.40 * experienceScore) + (0.15 * semanticScore);
-
-    // Ensure matchPercentage is never zero unless no match at all
-    const matchPercentage = combinedScore > 0 ? Math.round(combinedScore) : 1;
-
-    // Generate detailed explanation
-    let summary = "";
-    if (matchPercentage === 1) {
-        summary = "Candidate has minimal or no match with the job requirements.";
-    } else {
-        summary = `Candidate has relevant skills: ${matchedSkills.join(", ")}.`;
-        if (partiallyMatchedSkills.length > 0) {
-            summary += ` Partially matched skills: ${partiallyMatchedSkills.join(", ")}.`;
-        }
-        if (missingSkills.length > 0) {
-            summary += ` Missing skills: ${missingSkills.join(", ")}.`;
-        }
-        summary += ` Experience match score: ${experienceScore}%. Semantic similarity score: ${semanticSimilarity.toFixed(1)}%. Objective match score: ${objectiveScore.toFixed(1)}%.`;
-    }
+    // Composite match score (weighted average)
+    const compositeScore = (skillMatchScore * 0.5) + (expMatchScore * 0.3) + (semanticSimilarity * 0.2);
 
     return {
-        matchPercentage,
-        skillsMatchScore: skillMatchScore,
-        experienceScore,
-        semanticScore,
         matchedSkills,
         partiallyMatchedSkills,
         missingSkills,
-        summary
+        candidateExperience: candidateExp,
+        minimumExperienceRequired: minExpRequired,
+        experienceMatchScore: expMatchScore,
+        skillMatchScore,
+        semanticSimilarity,
+        compositeScore
     };
 }
 
-// POST: Apply for a job
+// POST route to submit a job application with resume upload and match computation
 router.post("/apply", upload.single("resume"), async (req, res) => {
     try {
-        let {
-            jobId,
+        const {
+            firstName,
+            lastName,
+            email,
+            phone,
+            linkedin,
+            github,
+            portfolio,
+            currentLocation,
+            applyingLocation,
+            jobTitle,
             jobDescription,
             jobSkills,
-            firstName,
-            lastName,
-            email,
-            phoneNumber,
-            yearOfGraduation,
-            gender,
-            jobTitle,
             experience,
+            minExperience,
+            education,
+            work_experience,
             skills,
-            location,
-            pincode,
-            parsedResume,
-            minExperience
+            resume_text
         } = req.body;
 
-        const resume = req.file ? req.file.filename : null;
-
-        // Validate jobId as ObjectId
-        if (jobId && !mongoose.Types.ObjectId.isValid(jobId)) {
-            console.warn(`Invalid jobId received: ${jobId}. Setting jobId to undefined.`);
-            jobId = undefined;
+        // Validate required fields (basic example)
+        if (!firstName || !lastName || !email || !jobTitle) {
+            return res.status(400).json({ error: "Missing required fields: firstName, lastName, email, or jobTitle" });
         }
 
-        // Parse parsedResume JSON string if needed
-        let parsedResumeObj = {};
-        if (parsedResume) {
-            try {
-                parsedResumeObj = typeof parsedResume === "string" ? JSON.parse(parsedResume) : parsedResume;
-            } catch (err) {
-                console.error("Error parsing parsedResume JSON:", err);
+        // Parse skills & work_experience JSON if sent as string
+        let parsedSkills = [];
+        if (skills) {
+            if (typeof skills === "string") {
+                try {
+                    parsedSkills = JSON.parse(skills);
+                    if (!Array.isArray(parsedSkills)) parsedSkills = skills.split(",").map(s => s.trim());
+                } catch {
+                    parsedSkills = skills.split(",").map(s => s.trim());
+                }
+            } else if (Array.isArray(skills)) {
+                parsedSkills = skills;
             }
         }
 
-        // Parse jobSkills JSON string if needed
-        let jobSkillsArray = [];
-        if (jobSkills) {
-            try {
-                jobSkillsArray = typeof jobSkills === "string" ? JSON.parse(jobSkills) : jobSkills;
-            } catch (err) {
-                console.error("Error parsing jobSkills JSON:", err);
+        let parsedWorkExperience = [];
+        if (work_experience) {
+            if (typeof work_experience === "string") {
+                try {
+                    parsedWorkExperience = JSON.parse(work_experience);
+                } catch {
+                    parsedWorkExperience = [];
+                }
+            } else if (Array.isArray(work_experience)) {
+                parsedWorkExperience = work_experience;
             }
         }
 
-        // Compute match details
+        // Convert experience values to numbers
+        const experienceNum = parseFloat(experience) || 0;
+        const minExperienceNum = parseFloat(minExperience) || 0;
+
+        // Candidate data structure
         const candidateData = {
-            education: parsedResumeObj.education ? (Array.isArray(parsedResumeObj.education) ? parsedResumeObj.education.map(ed => ed.degree || "").join(" ") : parsedResumeObj.education) : "",
-            skills: parsedResumeObj.skills ? (Array.isArray(parsedResumeObj.skills) ? parsedResumeObj.skills.map(s => s.name || s).join(", ") : parsedResumeObj.skills) : skills || "",
-            work_experience: parsedResumeObj.work_experience || "",
-            summary: parsedResumeObj.summary || "",
-            experience: experience,
-            minExperience: minExperience
-        };
-
-        const matchDetails = await computeMatchDetails(jobTitle, jobDescription, jobSkillsArray, candidateData);
-
-        const application = new JobApplication({
-            jobId,
             firstName,
             lastName,
             email,
-            phoneNumber,
-            yearOfGraduation,
-            gender,
+            phone,
+            linkedin,
+            github,
+            portfolio,
+            currentLocation,
+            applyingLocation,
             jobTitle,
-            experience,
-            skills,
-            location,
-            pincode,
-            resume,
-            parsedResume: parsedResumeObj,
-            matchPercentage: matchDetails.matchPercentage,
-            matchedSkills: matchDetails.matchedSkills,
-            missingSkills: matchDetails.missingSkills,
-            summary: matchDetails.summary
-        });
-
-        await application.save();
-        res.status(201).json({ message: "Application submitted successfully.", matchDetails });
-    } catch (error) {
-        console.error("Error submitting application:", error);
-        console.error(error.stack);
-        res.status(500).json({ error: "Something went wrong." });
-    }
-});
-
-// POST: Apply for a job
-router.post("/apply", upload.single("resume"), async (req, res) => {
-    try {
-        let {
-            jobId,
             jobDescription,
-            jobSkills,
-            firstName,
-            lastName,
-            email,
-            phoneNumber,
-            yearOfGraduation,
-            gender,
-            jobTitle,
-            experience,
-            skills,
-            location,
-            pincode,
-            parsedResume,
-            minExperience
-        } = req.body;
-
-        const resume = req.file ? req.file.filename : null;
-
-        // Validate jobId as ObjectId
-        if (jobId && !mongoose.Types.ObjectId.isValid(jobId)) {
-            console.warn(`Invalid jobId received: ${jobId}. Setting jobId to undefined.`);
-            jobId = undefined;
-        }
-
-        // Parse parsedResume JSON string if needed
-        let parsedResumeObj = {};
-        if (parsedResume) {
-            try {
-                parsedResumeObj = typeof parsedResume === "string" ? JSON.parse(parsedResume) : parsedResume;
-            } catch (err) {
-                console.error("Error parsing parsedResume JSON:", err);
-            }
-        }
-
-        // Parse jobSkills JSON string if needed
-        let jobSkillsArray = [];
-        if (jobSkills) {
-            try {
-                jobSkillsArray = typeof jobSkills === "string" ? JSON.parse(jobSkills) : jobSkills;
-            } catch (err) {
-                console.error("Error parsing jobSkills JSON:", err);
-            }
-        }
-
-        // Compute match details
-        const candidateData = {
-            education: parsedResumeObj.education ? (Array.isArray(parsedResumeObj.education) ? parsedResumeObj.education.map(ed => ed.degree || "").join(" ") : parsedResumeObj.education) : "",
-            skills: parsedResumeObj.skills ? (Array.isArray(parsedResumeObj.skills) ? parsedResumeObj.skills.map(s => s.name || s).join(", ") : parsedResumeObj.skills) : skills || "",
-            work_experience: parsedResumeObj.work_experience || "",
-            summary: parsedResumeObj.summary || "",
-            experience: experience,
-            minExperience: minExperience
+            skills: parsedSkills,
+            work_experience: parsedWorkExperience,
+            experience: experienceNum,
+            minExperience: minExperienceNum,
+            education,
+            resume_text
         };
 
-        const matchDetails = computeMatchDetails(jobTitle, jobDescription, jobSkillsArray, candidateData);
+        // Compute match details
+        const matchDetails = await computeMatchDetails(jobTitle, jobDescription, jobSkills, candidateData);
 
-        const application = new JobApplication({
-            jobId,
-            firstName,
-            lastName,
-            email,
-            phoneNumber,
-            yearOfGraduation,
-            gender,
-            jobTitle,
-            experience,
-            skills,
-            location,
-            pincode,
-            resume,
-            parsedResume: parsedResumeObj,
-            matchPercentage: matchDetails.matchPercentage,
-            matchedSkills: matchDetails.matchedSkills,
-            missingSkills: matchDetails.missingSkills,
-            summary: matchDetails.summary
+        // Save uploaded resume file path
+        if (req.file) {
+            candidateData.resume = req.file.path;
+        }
+
+        // Save application to MongoDB
+        const newApplication = new JobApplication({
+            ...candidateData,
+            matchDetails,
+            status: "Applied",
+            appliedAt: new Date()
         });
 
-        await application.save();
-        res.status(201).json({ message: "Application submitted successfully.", matchDetails });
+        await newApplication.save();
+
+        res.status(201).json({
+            message: "Application submitted successfully",
+            matchDetails
+        });
     } catch (error) {
         console.error("Error submitting application:", error);
-        console.error(error.stack);
-        res.status(500).json({ error: "Something went wrong." });
-    }
-});
-
-// GET: Get all candidates sorted by matchPercentage descending
-router.get("/candidates", async (req, res) => {
-    try {
-        const candidates = await JobApplication.find()
-            .sort({ matchPercentage: -1 })
-            .exec();
-        res.json(candidates);
-    } catch (error) {
-        console.error("Error fetching candidates:", error);
-        res.status(500).json({ error: "Something went wrong." });
+        res.status(500).json({ error: "Failed to submit application", details: error.message });
     }
 });
 
