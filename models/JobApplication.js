@@ -11,9 +11,11 @@ const JobApplicationSchema = new mongoose.Schema({
     experience: String,
     skills: String,
     location: String,
-    jobTitle:String,
+    jobTitle: String,
     pincode: String,
     resume: String, // filename stored
+    parsedResume: { type: Object, default: {} }, // parsed resume JSON from Affinda
+    matchPercentage: { type: Number, default: 0 }, // match percentage score
     status: { type: String, default: "Pending" },
 }, { timestamps: true });
 

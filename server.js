@@ -2,8 +2,12 @@ require("dotenv").config();
 const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
-const nodemailer = require("nodemailer");
-const { google } = require("googleapis");
+const multer = require("multer");
+const path = require("path");
+const dotenv = require("dotenv");
+const authRoutes = require("./routes/auth");
+const jobApplicationRoutes = require("./routes/jobApplicationRoutes");
+const JobApplication = require("./models/JobApplication");
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -20,27 +24,20 @@ mongoose.connect(process.env.MONGO_URI, {
     .then(() => console.log("✅ MongoDB connected"))
     .catch((err) => console.error("❌ MongoDB connection error:", err));
 
-// Mongoose schema
-const jobApplicationSchema = new mongoose.Schema({
-    firstName: String,
-    lastName: String,
-    email: String,
-    phoneNumber: String,
-    jobTitle: String,
-    status: { type: String, default: "Pending" },
-    interviewDate: Date,
-    ranking: Number,
-}, { timestamps: true });
+// Auth Routes
+app.use("/api/auth", authRoutes);
 
-const JobApplication = mongoose.model("JobApplication", jobApplicationSchema);
-
-// Google OAuth2 Client
-const oAuth2Client = new google.auth.OAuth2(
-    process.env.CLIENT_ID,
-    process.env.CLIENT_SECRET,
-    process.env.REDIRECT_URI
-);
-oAuth2Client.setCredentials({ refresh_token: process.env.REFRESH_TOKEN });
+// Multer setup for file uploads
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        cb(null, path.join(__dirname, "uploads"));
+    },
+    filename: (req, file, cb) => {
+        const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+        cb(null, `${uniqueSuffix}${path.extname(file.originalname)}`);
+    },
+});
+const upload = multer({ storage });
 
 // Nodemailer transporter with OAuth2
 async function createTransporter() {
@@ -78,82 +75,9 @@ app.get("/api/jobapplications", async (req, res) => {
     }
 });
 
-// Schedule Interview
-app.post("/api/schedule", async (req, res) => {
-    try {
-        const { applicantId, interviewDate, ranking } = req.body;
 
-        if (!applicantId || !interviewDate || typeof ranking !== "number") {
-            return res.status(400).json({ error: "Missing or invalid fields" });
-        }
-
-        // Find applicant
-        const applicant = await JobApplication.findById(applicantId);
-        if (!applicant) return res.status(404).json({ error: "Applicant not found" });
-
-        // Update applicant
-        applicant.status = "Interview Scheduled";
-        applicant.interviewDate = new Date(interviewDate);
-        applicant.ranking = ranking;
-        await applicant.save();
-
-        // Create Calendar Event
-        const calendar = google.calendar({ version: "v3", auth: oAuth2Client });
-        const event = {
-            summary: `Interview with ${applicant.firstName} ${applicant.lastName}`,
-            description: `Interview for ${applicant.jobTitle}`,
-            start: { dateTime: new Date(interviewDate).toISOString() },
-            end: {
-                dateTime: new Date(
-                    new Date(interviewDate).getTime() + 60 * 60 * 1000
-                ).toISOString(),
-            },
-            attendees: [{ email: applicant.email }],
-            reminders: {
-                useDefault: false,
-                overrides: [
-                    { method: "email", minutes: 24 * 60 },
-                    { method: "popup", minutes: 10 },
-                ],
-            },
-        };
-
-        const calendarResponse = await calendar.events.insert({
-            calendarId: "primary",
-            resource: event,
-            sendUpdates: "all",
-        });
-
-        // Send Email
-        const transporter = await createTransporter();
-        if (!transporter) {
-            return res.status(500).json({ error: "Failed to set up email transporter" });
-        }
-
-        const mailOptions = {
-            from: `HR Desk <${process.env.SENDER_EMAIL}>`,
-            to: applicant.email,
-            subject: "Interview Scheduled - HR Desk",
-            text: `Dear ${applicant.firstName},\n\nYour interview is scheduled on ${new Date(interviewDate).toLocaleString()}.\n\nBest regards,\nHR Desk`,
-            html: `
-                <p>Dear ${applicant.firstName},</p>
-                <p>Your interview is scheduled on <strong>${new Date(interviewDate).toLocaleString()}</strong>.</p>
-                <p>We've added the event to your calendar.</p>
-                <p>Best regards,<br/>HR Desk</p>
-            `,
-        };
-
-        await transporter.sendMail(mailOptions);
-
-        res.json({
-            message: "Interview scheduled and email sent",
-            eventId: calendarResponse.data.id,
-        });
-    } catch (error) {
-        console.error("❌ Error scheduling interview:", error);
-        res.status(500).json({ error: error.message || "Internal Server Error" });
-    }
-});
+// Register jobApplicationRoutes
+app.use("/api/jobapplications", jobApplicationRoutes);
 
 // Start server
 app.listen(PORT, () => {
