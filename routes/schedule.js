@@ -17,6 +17,11 @@ router.post("/schedule", async (req, res) => {
             return res.status(404).json({ message: "Applicant not found" });
         }
 
+        // Update interviewDate and status
+        applicant.interviewDate = new Date(date);
+        applicant.status = "Interview Scheduled";
+        await applicant.save();
+
         const { firstName, lastName, jobTitle } = applicant;
         const name = `${firstName} ${lastName}`;
         const formattedDate = new Date(date).toLocaleString();
@@ -54,9 +59,10 @@ router.post("/schedule", async (req, res) => {
         };
 
         await transporter.sendMail(mailOptions);
+
         res.status(200).json({ message: "Interview scheduled successfully" });
     } catch (error) {
-        console.error("Error sending email:", error);
+        console.error("Error scheduling interview:", error);
         res.status(500).json({ message: "Failed to schedule interview" });
     }
 });
