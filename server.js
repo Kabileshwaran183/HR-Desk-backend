@@ -5,6 +5,8 @@ const multer = require("multer");
 const path = require("path");
 const dotenv = require("dotenv");
 const authRoutes = require("./routes/auth");
+const jobApplicationRoutes = require("./routes/jobApplicationRoutes");
+const JobApplication = require("./models/JobApplication");
 
 dotenv.config();
 const app = express();
@@ -25,25 +27,6 @@ mongoose.connect(process.env.MONGO_URI, {
 
 // Auth Routes
 app.use("/api/auth", authRoutes);
-
-// Job Application Schema
-const jobApplicationSchema = new mongoose.Schema({
-    firstName: { type: String, required: true },
-    lastName: { type: String, required: true },
-    email: { type: String, required: true },
-    phoneNumber: { type: String, required: true },
-    yearOfGraduation: Number,
-    gender: String,
-    experience: Number,
-    skills: String,
-    jobTitle: String,
-    location: String,
-    pincode: String,
-    resume: String,
-    status: { type: String, default: "Pending" },
-}, { timestamps: true });
-
-const JobApplication = mongoose.model("JobApplication", jobApplicationSchema);
 
 // Multer setup for file uploads
 const storage = multer.diskStorage({
@@ -72,45 +55,9 @@ app.get("/api/jobapplications", async (req, res) => {
     }
 });
 
-// Submit a job application
-app.post("/api/jobapplications", upload.single("resume"), async (req, res) => {
-    try {
-        const {
-            firstName,
-            lastName,
-            email,
-            phoneNumber,
-            jobTitle,
-            experience,
-            skills,
-            location,
-            pincode,
-            yearOfGraduation,
-            gender
-        } = req.body;
 
-        const newApplication = new JobApplication({
-            firstName,
-            lastName,
-            email,
-            phoneNumber,
-            experience,
-            skills,
-            location,
-            pincode,
-            jobTitle,
-            yearOfGraduation,
-            gender,
-            resume: req.file?.filename || "",
-        });
-
-        await newApplication.save();
-        res.status(201).json({ message: "✅ Application submitted successfully!" });
-    } catch (error) {
-        console.error("❌ Error submitting application:", error);
-        res.status(500).json({ error: "Internal server error" });
-    }
-});
+// Register jobApplicationRoutes
+app.use("/api/jobapplications", jobApplicationRoutes);
 
 // Start server
 app.listen(PORT, () => {
