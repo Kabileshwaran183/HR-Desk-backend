@@ -9,7 +9,10 @@ const JobApplicationSchema = new mongoose.Schema({
     yearOfGraduation: String,
     gender: String,
     experience: String,
-    skills: String,
+    skills: {
+        type: [String],  // ✅ This allows an array of strings
+        required: true,
+      },
     location: String,
     jobTitle: String,
     pincode: String,
