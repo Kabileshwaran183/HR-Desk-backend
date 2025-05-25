@@ -29,17 +29,18 @@ const storage = multer.diskStorage({
 const upload = multer({ storage });
 
 // MongoDB connection
-mongoose.connect(process.env.MONGO_URI, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-})
+mongoose
+    .connect(process.env.MONGO_URI, {
+        useNewUrlParser: true,
+        useUnifiedTopology: true,
+    })
     .then(() => console.log("✅ MongoDB connected"))
     .catch((err) => console.error("❌ MongoDB connection error:", err));
 
 // Auth Routes
 app.use("/api/auth", authRoutes);
 
-// Register jobApplicationRoutes
+// Base route
 app.get("/", (req, res) => {
     res.send("Welcome to the Job Application API 🚀");
 });
@@ -53,6 +54,35 @@ app.get("/api/jobapplications", async (req, res) => {
         res.status(500).json({ error: "Error fetching applications" });
     }
 });
+
+// PATCH route to update application status
+app.patch("/api/jobapplications/:id/status", async (req, res) => {
+    try {
+        const { status } = req.body;
+        const appId = req.params.id;
+
+        if (!status) {
+            return res.status(400).json({ message: "Status is required" });
+        }
+
+        const updatedApp = await JobApplication.findByIdAndUpdate(
+            appId,
+            { status },
+            { new: true }
+        );
+
+        if (!updatedApp) {
+            return res.status(404).json({ message: "Application not found" });
+        }
+
+        res.json({ message: "Status updated successfully", application: updatedApp });
+    } catch (error) {
+        console.error("Error updating status:", error);
+        res.status(500).json({ message: "Server error" });
+    }
+});
+
+// Use other job application routes (if any)
 app.use("/api/jobapplications", jobApplicationRoutes);
 
 // Schedule Interview Route
@@ -93,11 +123,6 @@ app.post("/api/schedule", async (req, res) => {
         console.error("Error sending email:", error);
         res.status(500).json({ message: "Failed to schedule interview" });
     }
-});
-
-// Base route
-app.get("/", (req, res) => {
-    res.send("Job Application API is running 🚀");
 });
 
 // Start server
