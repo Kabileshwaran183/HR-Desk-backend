@@ -269,26 +269,11 @@ async function computeMatchDetails(jobTitle, jobDescription, jobSkills, candidat
 
     if (embeddingJob && embeddingCandidate) {
         semanticSimilarity = cosineSimilarity(embeddingJob, embeddingCandidate);
-     } else {
-        // fallback TF-IDF semantic similarity
+    } else {
+        // fallback TF-IDF similarity
         const tfidfVectors = computeTfIdfVectors([jobText, candidateText]);
         semanticSimilarity = cosineSimilarity(tfidfVectors[0], tfidfVectors[1]);
     }
-
-    return {
-        matchedSkills,
-        partiallyMatchedSkills,
-        missingSkills,
-        experience: {
-            candidateYears: candidateExp,
-            minimumRequired: minExpRequired,
-            matchScore: expMatchScore
-        },
-        skillMatchScore,
-        semanticSimilarity,
-        overallScore: (skillMatchScore * 0.5 + expMatchScore * 0.2 + semanticSimilarity * 0.3)
-    };
-
 
     // Composite match score (weighted average)
     const compositeScore = (skillMatchScore * 0.5) + (expMatchScore * 0.3) + (semanticSimilarity * 0.2);
